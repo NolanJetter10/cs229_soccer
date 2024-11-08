@@ -90,14 +90,12 @@ def find_plant_foot(ball_location, pose_keypoints_array):
 
     # Determine which foot has the smaller covariance determinant
     left_det = np.linalg.det(left_foot_covariance)
-    print("left det:", left_det)
     right_det = np.linalg.det(right_foot_covariance)
-    print("right det:", right_det)
 
     return ["left", left_foot_positions_all] if left_det < right_det else ["right", right_foot_positions_all]
 
 
-def find_plant_frame(avg_foot_positions, tol=3):
+def find_plant_frame(avg_foot_positions, tol=10):
     """
     Finds the frame at which the plant foot becomes stationary.
 
@@ -110,37 +108,46 @@ def find_plant_frame(avg_foot_positions, tol=3):
         int: The frame number at which the foot becomes stationary.
     """
     for i in range(1, len(avg_foot_positions) - 2):
-        one_back = np.linalg.norm(avg_foot_positions[i] - avg_foot_positions[i-1])
-        current = np.linalg.norm(avg_foot_positions[i+1] - avg_foot_positions[i])
-        one_forward = np.linalg.norm(avg_foot_positions[i+2] - avg_foot_positions[i+1])
+        one_back = np.linalg.norm(avg_foot_positions[i] - avg_foot_positions[i - 1])
+        current = np.linalg.norm(avg_foot_positions[i + 1] - avg_foot_positions[i])
+        one_forward = np.linalg.norm(avg_foot_positions[i + 2] - avg_foot_positions[i + 1])
         if one_back < tol and one_back != 0 and current < tol and current != 0 and one_forward < tol and one_forward != 0:
-            return i-1
+            return i - 1
 
     return -1  # If no stationary frame is found
 
 
 def find_foot_plant_information(kick_number):
-    kick_number = 10
-    print("Kick Number:", kick_number)
-    contact_frame = load_contact_frames()[kick_number - 1]
     pose_keypoints_array = []
 
     # Load pose keypoints up to the contact frame
-    for i in range(contact_frame):
-        json_file = os.path.join(os.path.dirname(__file__),
-                                 f'../output/pose_estimation_results_1/Kick_{kick_number}_0000000000{str(i).zfill(2)}_keypoints.json')
-        pose_keypoints = load_keypoints_from_json(json_file)
-        if pose_keypoints is not None:
-            pose_keypoints_array.append(pose_keypoints)
+    i = 0
+    still_frames = True
+    zero_frames = 0
+    something_tracked = False
+    while still_frames:
+        try:
+            json_file = os.path.join(os.path.dirname(__file__),
+                                     f'../output/pose_estimation_results_1/Kick_{kick_number}_0000000000{str(i).zfill(2)}_keypoints.json')
+            pose_keypoints = load_keypoints_from_json(json_file)
+            if pose_keypoints is not None:
+                pose_keypoints_array.append(pose_keypoints)
+                something_tracked = True
+            else:
+                if not something_tracked:
+                    zero_frames += 1
+            i += 1
+        except:
+            still_frames = False
+
 
     pose_keypoints_array = np.array(pose_keypoints_array)
-    print("Pose Keypoints Shape:", pose_keypoints_array.shape)
 
     ball_location = [0, 0]
     plant_foot, foot_positions_per_frame = find_plant_foot(ball_location, pose_keypoints_array)
 
     # need to add in functionality to find the frame at which the foot is planted.
     frame = find_plant_frame(np.array(foot_positions_per_frame))
-
-    print("Plant Foot:", plant_foot)
-    print("planted on frame ", frame)
+    frame += zero_frames
+    print("look here: ", frame)
+    return plant_foot, frame

@@ -109,8 +109,64 @@ def draw_annotations(frame, left_foot, right_foot, closest_ball):
     return frame
 
 
-def FindBallLocation(video_number):
+def user_find_ball(video_path):
+    curr_frame = 0
+    cap, frame = open_video(video_path, curr_frame)
+    if frame is None:
+        return None
+
+    coordinates = []
+    ball_found = False  # Flag to exit after finding the ball location
+
+    def click_event(event, x, y, flags, param):
+        nonlocal coordinates, ball_found
+        if event == cv2.EVENT_LBUTTONDOWN:
+            if coordinates:
+                last_x, last_y = coordinates[-1]
+                distance = np.sqrt((x - last_x) ** 2 + (y - last_y) ** 2)
+                if distance < 50:
+                    avg_x = (last_x + x) // 2
+                    avg_y = (last_y + y) // 2
+                    print(f"Ball location determined at: ({avg_x}, {avg_y})")
+                    coordinates.append((avg_x, avg_y))
+                    ball_found = True  # Set flag to exit loop
+                    return
+            coordinates.append((x, y))
+
+
+    # Set up the mouse callback once for the window
+    cv2.namedWindow("Select Ball Location")
+    cv2.setMouseCallback("Select Ball Location", click_event)
+
+    while not ball_found:
+        cap.set(cv2.CAP_PROP_POS_FRAMES, curr_frame)
+        ret, frame = cap.read()
+        if not ret:
+            print("End of video reached or error loading frame.")
+            break
+
+        # Display the current frame
+        cv2.imshow("Select Ball Location", frame)
+
+        # Wait for user input
+        key = cv2.waitKey(0)
+        if key == ord('q'):  # Exit if 'q' is pressed
+            break
+        elif key == ord(' '):  # Move to next frame if space key is pressed
+            curr_frame += 1
+
+    # Clean up resources after loop
+    cap.release()
+    cv2.destroyWindow("Select Ball Location")  # Close specific window
+    cv2.destroyAllWindows()
+
+    # Return the last determined location if found, or None otherwise
+    return coordinates[-1]
+
+
+def FindBallLocation(video_number, annotate_image=False):
     """Main function to perform ball location analysis on a specified video."""
+    print("finding ball location on video ", video_number)
     contact_frames = load_contact_frames()
     if contact_frames is None or video_number < 1 or video_number > len(contact_frames):
         print(f"Invalid video number {video_number}.")
@@ -128,8 +184,8 @@ def FindBallLocation(video_number):
     pose_data = load_pose_data(pose_estimation_path)
 
     # Determine foot positions
-    left_foot_joints = [11, 22, 23, 24, 9, 10]  # Left ankle, heel, big toe
-    right_foot_joints = [14, 19, 20, 21, 12, 13]  # Right ankle, heel, big toe
+    left_foot_joints = [11, 22, 23, 24]  # Left ankle, heel, big toe
+    right_foot_joints = [14, 19, 20, 21]  # Right ankle, heel, big toe
     left_foot = get_foot_position(pose_data, left_foot_joints)
     right_foot = get_foot_position(pose_data, right_foot_joints)
 
@@ -141,9 +197,17 @@ def FindBallLocation(video_number):
         return
     closest_ball = find_closest_ball(circles, left_foot, right_foot)
 
-    # Draw annotations and display
-    annotated_frame = draw_annotations(frame, left_foot, right_foot, closest_ball)
-    cv2.imshow('Detected Soccer Ball', annotated_frame)
-    cv2.waitKey(0)
-    cv2.destroyAllWindows()
-    cap.release()
+    if not annotate_image:
+        if closest_ball is not None:
+            return closest_ball
+        else:
+            x, y = user_find_ball(video_path)
+            return x, y, 1
+
+    else:
+        annotated_frame = draw_annotations(frame, left_foot, right_foot, closest_ball)
+        cv2.imshow('Detected Soccer Ball', annotated_frame)
+        cv2.waitKey(0)
+        cv2.destroyAllWindows()
+        cap.release()
+

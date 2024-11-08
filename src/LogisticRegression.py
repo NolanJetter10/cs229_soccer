@@ -1,62 +1,83 @@
 import numpy as np
+import matplotlib.pyplot as plt
 
+# Load and preprocess the data
+data = np.load("Processed_keypoints.npy")
+data = data[:, :1, :, :]  # Only take the contact frame
+data = np.reshape(data, (20, 50)).astype(np.float64)  # Ensure data is float64
 
-class LogisticRegression:
-    def __init__(self):
-        self.theta = None
+labels = np.load("Data_labels.npy", allow_pickle=True)
+labels = labels[:, 4:5]  # Focus on the type of strike (5th column)
+labels = np.reshape(labels, (20,)).astype(np.float64)  # Ensure labels are float64
 
-    def sigmoid(self, z):
-        return 1 / (1 + np.exp(-z))
+# Define the sigmoid function
+def sigmoid(z):
+    return 1 / (1 + np.exp(-z))
 
-    def compute_cost(self, X, y):
-        m = len(y)
-        h = self.sigmoid(X @ self.theta)
-        return (1 / (2 * m)) * np.sum((h - y) ** 2)  # MSE
+# Gradient descent function for logistic regression
+def gradient_descent(X, y, weights, alpha, num_iters):
+    m = len(y)
+    for _ in range(num_iters):
+        predictions = sigmoid(X @ weights)
+        gradient = (1 / m) * X.T @ (predictions - y)
+        weights -= alpha * gradient
+    return weights
 
-    def gradient(self, X, y):
-        m = len(y)
-        h = self.sigmoid(X @ self.theta)
-        return (1 / m) * X.T @ (h - y)
+# Leave-One-Out Cross-Validation with training and testing accuracy
+def logistic_regression_loocv(data, labels, alpha, num_iters):
+    m, n = data.shape
+    cumulative_test_score = 0
+    cumulative_train_score = 0
 
-    def hessian(self, X, y):
-        m = len(y)
-        h = self.sigmoid(X @ self.theta)
-        R = np.diag(h * (1 - h))  # Diagonal matrix of the sigmoid derivative
-        return (1 / m) * X.T @ R @ X
+    for i in range(m):
+        # Separate the test sample and training data for LOOCV
+        X_train = np.delete(data, i, axis=0)
+        y_train = np.delete(labels, i)
+        X_test = data[i].reshape(1, -1)
+        y_test = labels[i]
 
-    def gradient_descent(self, X, y, alpha, num_iters):
-        for i in range(num_iters):
-            grad = self.gradient(X, y)
-            self.theta -= alpha * grad
-            if i % 10 == 0:  # Track error every 10 iterations
-                print(f"Iteration {i}, Error: {self.compute_cost(X, y)}")
+        # Initialize weights
+        weights = np.zeros(n, dtype=np.float64)
 
-    def newtons_method(self, X, y, num_iters):
-        for i in range(num_iters):
-            grad = self.gradient(X, y)
-            H = self.hessian(X, y)
-            self.theta -= np.linalg.inv(H) @ grad
-            if i % 10 == 0:  # Track error every 10 iterations
-                print(f"Iteration {i}, Error: {self.compute_cost(X, y)}")
+        # Train the model using gradient descent
+        weights = gradient_descent(X_train, y_train, weights, alpha, num_iters)
 
-    def train(self, X, y, method="gradient_descent", alpha=0.01, num_iters=1000):
-        X = np.insert(X, 0, 1, axis=1)  # Add intercept term
-        self.theta = np.zeros(X.shape[1])
+        # Make a prediction on the test sample
+        test_prediction = sigmoid(X_test @ weights) >= 0.5
+        cumulative_test_score += (test_prediction == y_test)
 
-        if method == "gradient_descent":
-            self.gradient_descent(X, y, alpha, num_iters)
-        elif method == "newtons_method":
-            self.newtons_method(X, y, num_iters)
-        else:
-            raise ValueError("Invalid method specified. Choose 'gradient_descent' or 'newtons_method'.")
+        # Calculate training accuracy on the remaining 19 samples
+        train_predictions = sigmoid(X_train @ weights) >= 0.5
+        cumulative_train_score += np.mean(train_predictions == y_train)
 
-        return self.compute_cost(X, y)  # Final training error
+    # Calculate average accuracy across all LOOCV folds
+    test_accuracy = cumulative_test_score / m
+    train_accuracy = cumulative_train_score / m
+    return test_accuracy, train_accuracy
 
-    def predict(self, X):
-        X = np.insert(X, 0, 1, axis=1)  # Add intercept term
-        return self.sigmoid(X @ self.theta) >= 0.5
+# Parameters for gradient descent and iteration range
+alpha = 0.01  # Learning rate
+iteration_values = list(range(0, 100000, 5000))  # Range from 100 to 2000 by 100
 
-    def test(self, X, y):
-        predictions = self.predict(X)
-        mse = np.mean((predictions - y) ** 2)  # MSE as error metric
-        return mse
+# Lists to store accuracy results
+test_accuracies = []
+train_accuracies = []
+
+# select the label: 
+
+# Run LOOCV for each iteration count and record accuracies
+for num_iters in iteration_values:
+    test_accuracy, train_accuracy = logistic_regression_loocv(data, labels, alpha, num_iters)
+    test_accuracies.append(test_accuracy)
+    train_accuracies.append(train_accuracy)
+
+# Plotting results
+plt.figure(figsize=(10, 6))
+plt.plot(iteration_values, test_accuracies, label="Test Accuracy", color="blue", marker="o", linestyle="-")
+plt.plot(iteration_values, train_accuracies, label="Train Accuracy", color="red", marker="o", linestyle="-")
+plt.xlabel("Number of Iterations")
+plt.ylabel("Accuracy")
+plt.title("Training and Testing Accuracy vs. Number of Iterations")
+plt.legend()
+plt.grid()
+plt.show()

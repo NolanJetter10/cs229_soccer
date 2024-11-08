@@ -254,13 +254,20 @@ def main_func(kick_number, joint_groups, names, interval=1500):
 
     master_array = []
     ball_location = [0, 0]  # Define ball location here as needed
-    for i in range(30):  # Adjust the frame limit as needed
-        json_file = os.path.join(os.path.dirname(__file__),
-                                 f'../output/pose_estimation_results_1/Kick_{kick_number}_0000000000{str(i).zfill(2)}_keypoints.json')
-        pose_keypoints = load_keypoints_from_json(json_file)
-        if pose_keypoints is not None:
-            adjusted_keypoints = adjust_keypoints_to_ball_location(pose_keypoints, ball_location)
-            master_array.append(adjusted_keypoints)
+    still_frames = True
+    i = 0
+    while still_frames:
+        try:
+            json_file = os.path.join(os.path.dirname(__file__),
+                                     f'../output/pose_estimation_results_1/Kick_{kick_number}_0000000000{str(i).zfill(2)}_keypoints.json')
+            pose_keypoints = load_keypoints_from_json(json_file)
+            if pose_keypoints is not None:
+                adjusted_keypoints = adjust_keypoints_to_ball_location(pose_keypoints, ball_location)
+                master_array.append(adjusted_keypoints)
+        except:
+            i = 0
+            still_frames = False
+        i += 1
 
     master_array = np.array(master_array)
     limits = calculate_limits(master_array)
@@ -273,7 +280,7 @@ def main_func(kick_number, joint_groups, names, interval=1500):
 
 
 if __name__ == "__main__":
-    kick_number = 9
+    kick_number = 1
     joint_groups = [[11, 22, 23, 24], [14, 19, 20, 21]]  # Define groups of joints to average
     names = ["left foot", "right foot"]  # Define names for each group
-    main_func(kick_number, joint_groups, names, interval=500)
+    main_func(kick_number, joint_groups, names, interval=200)

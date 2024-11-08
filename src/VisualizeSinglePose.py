@@ -18,6 +18,7 @@ POSE_CONNECTIONS = [
 
 def load_keypoints_from_json(json_file):
     """Load pose keypoints from a JSON file."""
+    print("Attempting to load JSON from:", json_file)
     with open(json_file, 'r') as f:
         data = json.load(f)
         if len(data["people"]) == 0:
@@ -77,6 +78,6 @@ def display_frame_with_pose(video_number, frame_number):
 
 # Example usage:
 contact_frames = np.load("contact_frames.npy")
-video_number = 9
-frame_number = 63
+video_number = 1
+frame_number = 45
 display_frame_with_pose(video_number, frame_number)
