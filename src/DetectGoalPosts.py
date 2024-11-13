@@ -1,11 +1,34 @@
 import cv2
 import numpy as np
 
-# Load in the video directory
-directory = "/Users/nolanjetter/Documents/GitHub/cs229_soccer/dataset/Session 1/Kick 1.mp4"
 
+def preprocess_image(image, gamma=1.2):
+    # Convert to HSV color space
+    hsv = cv2.cvtColor(image, cv2.COLOR_BGR2HSV)
+    h, s, v = cv2.split(hsv)
+
+    # Apply CLAHE to the V (brightness) channel
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    v = clahe.apply(v)
+
+    # Gamma correction for further brightness control
+    v = np.array(255 * (v / 255) ** gamma, dtype=np.uint8)
+
+    # Merge channels back and convert to BGR
+    hsv = cv2.merge([h, s, v])
+    processed_image = cv2.cvtColor(hsv, cv2.COLOR_HSV2BGR)
+
+    return processed_image
+
+
+# Load in the video directory
+kick_number = 15
+session_number = 3
+video_directory = "/Users/nolanjetter/Documents/GitHub/cs229_soccer/dataset/Session " + str(session_number) +"/Kick " + str(kick_number) + ".mp4"
+ball_coordinates = "/Users/nolanjetter/Documents/GitHub/cs229_soccer/output/Session " + str(session_number) + "/Ball_coordinates.npy"
+ball_coordinate = ball_coordinates[kick_number]
 # Load the video
-video = cv2.VideoCapture(directory)
+video = cv2.VideoCapture(video_directory)
 
 # Grab the first frame from the video
 ret, frame = video.read()
@@ -22,10 +45,13 @@ edges = cv2.Canny(gray, 100, 200)  # Adjust the thresholds as needed
 
 # Perform the Hough Line Transform to get lines above a certain threshold
 lines = cv2.HoughLinesP(edges, rho=1, theta=np.pi / 180, threshold=100, minLineLength=50, maxLineGap=10)
+processed_image = preprocess_image(frame)
 
 
 # Function to check if a line is white
-def is_white_line(line, image, white_threshold=225):
+
+
+def is_white_line(line, image, white_threshold=100):
     x1, y1, x2, y2 = line[0]
     num_white_pixels = 0
     num_checked_pixels = 0
@@ -78,47 +104,98 @@ def is_horizontal_line(line, horiz_threshold=5):
     return angle <= horiz_threshold
 
 
-def capture_goal_posts(vertical_sets, horizontal_lines, distance_threshold=400):
+def capture_goal_posts(vertical_sets, horizontal_lines, alpha=1.0):
     """
-    Finds the best match of vertical lines and a horizontal line to represent a goal structure.
+    Finds the best match of vertical lines and a horizontal line to represent a goal structure,
+    adding a penalty for horizontal lines deviating from the intended y-coordinate of the crossbar.
 
     :param vertical_sets: List of pairs of vertical lines, each potentially representing two goalposts.
     :param horizontal_lines: List of horizontal lines, each potentially representing a crossbar.
-    :param distance_threshold: Maximum allowed distance for endpoints to be considered a close match.
-    :return: Best matched set of [left_post, right_post, crossbar] with minimal endpoint distances.
+    :param alpha: Penalty multiplier for deviation in y-coordinate of the horizontal line.
+    :return: Best matched set of [left_post, right_post, crossbar] with minimal cost.
     """
     best_match = None
-    best_fit_value = float('inf')  # Initialize with a large value to find the minimum fit
+    best_cost = float('inf')  # Initialize with a large value to find the minimum cost
 
-    # Iterate through each pair of vertical lines
-    for vertical_pair in vertical_sets:
-        left_post, right_post = vertical_pair
+    # Iterate through each horizontal line
+    for h_line in horizontal_lines:
+        x1_h, y1_h, x2_h, y2_h = h_line[0]
+        horizontal_y_avg = (y1_h + y2_h) / 2  # Calculate the y-coordinate of the horizontal line's midpoint
 
-        # Extract endpoints of the vertical lines (goalposts)
-        vertical_endpoints = [
-            (left_post[0][0], left_post[0][1]), (left_post[0][2], left_post[0][3]),
-            (right_post[0][0], right_post[0][1]), (right_post[0][2], right_post[0][3])
-        ]
+        # Iterate through each vertical set
+        for vertical_pair in vertical_sets:
+            left_post, right_post = vertical_pair
 
-        # Iterate through each horizontal line
-        for horizontal_line in horizontal_lines:
-            x1_h, y1_h, x2_h, y2_h = horizontal_line[0]
+            # Extract the "upper" endpoints of the vertical lines
+            upper_left = (left_post[0][0], min(left_post[0][1], left_post[0][3]))
+            upper_right = (right_post[0][0], min(right_post[0][1], right_post[0][3]))
 
-            # Find the closest endpoint in the vertical pair to the first endpoint of the horizontal line
+            # Calculate the intended y-coordinate as the average y of the two upper points
+            intended_y = (upper_left[1] + upper_right[1]) / 2
+
+            # Compute the penalty based on deviation of the horizontal line's midpoint y from the intended y
+            y_deviation_penalty = alpha * (horizontal_y_avg - intended_y) ** 2
+
+            # Calculate the minimum distance from each horizontal endpoint to the closest vertical endpoint
+            vertical_endpoints = [
+                (left_post[0][0], left_post[0][1]), (left_post[0][2], left_post[0][3]),
+                (right_post[0][0], right_post[0][1]), (right_post[0][2], right_post[0][3])
+            ]
             min_distance_1 = min(np.linalg.norm(np.array([x1_h, y1_h]) - np.array(endpoint)) for endpoint in vertical_endpoints)
-
-            # Find the closest endpoint in the vertical pair to the second endpoint of the horizontal line
             min_distance_2 = min(np.linalg.norm(np.array([x2_h, y2_h]) - np.array(endpoint)) for endpoint in vertical_endpoints)
 
-            # Aggregate the minimum distances to get a "fit score" for this combination
-            fit_value = min_distance_1 + min_distance_2
+            # Calculate the total cost as the sum of distances plus the y-deviation penalty
+            total_cost = min_distance_1 + min_distance_2 + y_deviation_penalty
 
-            # Check if this combination is the best match so far and meets the distance threshold
-            if fit_value < best_fit_value and min_distance_1 <= distance_threshold and min_distance_2 <= distance_threshold:
-                best_fit_value = fit_value
-                best_match = [left_post, right_post, horizontal_line]
+            # Update best match if the total cost is lower than the current best cost
+            if total_cost < best_cost:
+                best_cost = total_cost
+                best_match = [left_post, right_post, h_line]
 
-    return best_match[0], best_match[1], best_match[2]
+    return best_match
+
+
+def process_goal_structure(left_post, right_post, crossbar):
+    """
+    Processes the goal structure by creating adjusted vertical lines (goalposts) and a connected crossbar.
+
+    :param left_post: Line representing the left vertical post (in the format [[x1, y1, x2, y2]]).
+    :param right_post: Line representing the right vertical post (in the format [[x1, y1, x2, y2]]).
+    :param crossbar: Line representing the crossbar (in the format [[x1, y1, x2, y2]]).
+    :return: Processed left_post, right_post, and crossbar lines in the same format.
+    """
+
+    # Determine the intersection points of the horizontal line (crossbar) with each vertical line
+    x1_left, y1_left, x2_left, y2_left = left_post[0]
+    x1_right, y1_right, x2_right, y2_right = right_post[0]
+    x1_cross, y1_cross, x2_cross, y2_cross = crossbar[0]
+
+    # The intersection points of the crossbar with each vertical line
+    intersection_left = (int(x1_left), int(y1_cross)) if y1_left < y2_left else (int(x2_left), int(y1_cross))
+    intersection_right = (int(x1_right), int(y1_cross)) if y1_right < y2_right else (int(x2_right), int(y1_cross))
+
+    # Create a new crossbar line between the intersection points
+    processed_crossbar = [[intersection_left[0], intersection_left[1], intersection_right[0], intersection_right[1]]]
+
+    # Calculate the length of the post between the two intersections
+    post_length = abs(intersection_right[0] - intersection_left[0])
+
+    # Calculate the length of each vertical segment as one-third of the post length
+    segment_length = int(post_length / 3)
+
+    # Draw vertical lines extending downward from each intersection point by one-third of the post length
+    processed_left_post = [[
+        intersection_left[0], intersection_left[1],
+        intersection_left[0], intersection_left[1] + segment_length
+    ]]
+
+    processed_right_post = [[
+        intersection_right[0], intersection_right[1],
+        intersection_right[0], intersection_right[1] + segment_length
+    ]]
+
+    return processed_left_post, processed_right_post, processed_crossbar
+
 
 def capture_vertical_pairs(vertical_lines, y_threshold=20, spread_threshold=30):
     """
@@ -157,7 +234,7 @@ white_vertical_lines = []
 white_horizontal_lines = []
 
 for line in lines:
-    if is_white_line(line, frame):
+    if is_white_line(line, processed_image):
         white_lines.append(line)
         if is_vertical_line(line):
             white_vertical_lines.append(line)
@@ -166,8 +243,8 @@ for line in lines:
 
 # create pairs of lines based on how close their y-coordinate midpoints are.
 vert_sets = capture_vertical_pairs(white_vertical_lines)
-print(len(vert_sets))
 left_post, right_post, crossbar = capture_goal_posts(vert_sets, white_horizontal_lines)
+left_post, right_post, crossbar = process_goal_structure(left_post, right_post, crossbar)
 
 # Draw left post in blue
 x1, y1, x2, y2 = left_post[0]

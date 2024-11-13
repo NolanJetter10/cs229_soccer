@@ -4,7 +4,7 @@ import json
 from FindBallLocation import FindBallLocation
 from FindFirstPhase import find_foot_plant_information
 
-save_path = 'output/Session 1'
+save_path = 'output/Session 2'
 base_dir = os.path.abspath(os.path.join(os.getcwd(), ".."))
 full_save_path = os.path.join(base_dir, save_path)
 
